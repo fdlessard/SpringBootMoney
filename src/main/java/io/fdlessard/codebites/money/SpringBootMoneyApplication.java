@@ -5,11 +5,13 @@ import com.fasterxml.jackson.databind.JsonSerializer;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializerProvider;
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
-import com.sun.xml.internal.ws.policy.privateutil.PolicyUtils;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
 
 import java.io.IOException;
 import java.math.BigDecimal;
@@ -20,10 +22,103 @@ import java.util.List;
 @SpringBootApplication
 public class SpringBootMoneyApplication {
 
+    @RestController
+    public class DocumentController {
+
+        // http://localhost:8080/document?currencyCode=CAD
+
+        @RequestMapping("/document")
+        public Document get(@RequestParam(value = "currencyCode", defaultValue = "USD") String currencyCode) {
+            ThreadLocalStorage.setCurrency(Currency.getInstance(currencyCode));
+            return buildDocument(Currency.getInstance(currencyCode));
+        }
+    }
+
+    @Data
+    @AllArgsConstructor
+    static class Document {
+        private String id;
+        private Currency currency;
+        private List<Item> items;
+    }
+
+    @Data
+    @AllArgsConstructor
+    static class Item {
+        private String id;
+        private String code;
+        @JsonSerialize(using = BigDecimalSerializer.class)
+        private BigDecimal totalAmount;
+        private List<AmountGroup> amountGroups;
+    }
+
+    @Data
+    @AllArgsConstructor
+    static class AmountGroup {
+        private String name;
+        @JsonSerialize(using = BigDecimalSerializer.class)
+        private BigDecimal netAmount;
+        @JsonSerialize(using = BigDecimalSerializer.class)
+        private BigDecimal grossAmount;
+    }
+
+    static class BigDecimalSerializer extends JsonSerializer<BigDecimal> {
+
+        @Override
+        public void serialize(
+                BigDecimal number,
+                JsonGenerator jsonGenerator,
+                SerializerProvider provider
+        ) throws IOException {
+            jsonGenerator.writeNumber(localize(number, ThreadLocalStorage.getCurrency()));
+        }
+
+        private BigDecimal localize(BigDecimal number, Currency currency) {
+            return number.setScale(currency.getDefaultFractionDigits(), BigDecimal.ROUND_HALF_UP);
+        }
+    }
+
+    private static Document buildDocument(Currency currency) {
+        return new Document("documentId", currency, buildItems());
+    }
+
+    private static List<Item> buildItems() {
+
+        List<Item> items = new ArrayList<>();
+        Item item = new Item("item1", "itemCode1", BigDecimal.ONE, buildAmountGroups());
+        items.add(item);
+        item = new Item("item2", "itemCode2", BigDecimal.TEN, buildAmountGroups());
+        items.add(item);
+        return items;
+    }
+
+    private static List<AmountGroup> buildAmountGroups() {
+
+        List<AmountGroup> amountGroups = new ArrayList<>();
+        AmountGroup amountGroup = new AmountGroup("amountGrp1", BigDecimal.ONE, BigDecimal.TEN);
+        amountGroups.add(amountGroup);
+        amountGroup = new AmountGroup("amountGrp2", BigDecimal.ZERO, BigDecimal.TEN);
+        amountGroups.add(amountGroup);
+        return amountGroups;
+    }
+
+    public static class ThreadLocalStorage {
+
+        private static ThreadLocal<Currency> curr = new ThreadLocal<>();
+
+        public static void setCurrency(Currency currency) {
+            curr.set(currency);
+        }
+
+        public static Currency getCurrency() {
+            return curr.get();
+        }
+    }
+
     public static void main(String[] args) {
         SpringApplication.run(SpringBootMoneyApplication.class, args);
-        bigDecimalExperimentation();
-        documentSerializationExperimentation();
+        //bigDecimalExperimentation();
+        //documentSerializationExperimentation();
     }
 
     private static void bigDecimalExperimentation() {
@@ -46,75 +141,16 @@ public class SpringBootMoneyApplication {
         System.out.println("Sums Scale 2 before addition: " + number1s2.setScale(2, BigDecimal.ROUND_HALF_UP).add(number2s2.setScale(2, BigDecimal.ROUND_HALF_UP)));
     }
 
+    private static void documentSerializationExperimentation() {
 
-    private static void documentSerializationExperimentation()  {
-
-        Document document  = buildDocument();
-
-
+        Document document = buildDocument(ThreadLocalStorage.getCurrency());
         ObjectMapper objectMapper = new ObjectMapper();
-
         try {
             System.out.println(objectMapper.writeValueAsString(document));
 
         } catch (Exception e) {
 
         }
-
-    }
-
-    private static Document buildDocument() {
-        return  new Document("documentId", Currency.getInstance("USD"), buildItems());
-    }
-
-    private static List<Item> buildItems() {
-
-        List<Item> items = new ArrayList<>();
-
-        Item item =  new Item("item1", "itemCode1", buildAmountGroups());
-        items.add(item);
-        item =  new Item("item2", "itemCode2", buildAmountGroups());
-        items.add(item);
-
-        return items;
-
-    }
-
-    private static List<AmountGroup> buildAmountGroups(){
-
-        List<AmountGroup> amountGroups = new ArrayList<>();
-
-        AmountGroup amountGroup = new AmountGroup("amountGrp1", BigDecimal.ONE, BigDecimal.TEN);
-        amountGroups.add(amountGroup);
-        amountGroup = new AmountGroup("amountGrp2", BigDecimal.ZERO, BigDecimal.TEN);
-        amountGroups.add(amountGroup);
-
-        return amountGroups;
-    }
-
-    @Data
-    @AllArgsConstructor
-    @JsonSerialize(using = DocumentSerializer.class)
-    static class  Document {
-        private String id;
-        private Currency currency;
-        private List<Item> items;
-    }
-
-    @Data
-    @AllArgsConstructor
-    static class Item {
-        private String id;
-        private String code;
-        private List<AmountGroup> amountGroups;
-    }
-
-    @Data
-    @AllArgsConstructor
-    static class AmountGroup {
-        private String name;
-        private BigDecimal netAmount;
-        private BigDecimal grossAmount;
     }
 
     static class DocumentSerializer extends JsonSerializer<Document> {
@@ -125,16 +161,29 @@ public class SpringBootMoneyApplication {
                 JsonGenerator jsonGenerator,
                 SerializerProvider provider
         ) throws IOException {
+            provider.setAttribute("LaCurrency", document.currency.getCurrencyCode());
             jsonGenerator.writeStartObject();
             jsonGenerator.writeStringField("id", document.id);
             jsonGenerator.writeStringField("currency", document.currency.getCurrencyCode());
             jsonGenerator.writeObjectField("items", document.getItems());
             jsonGenerator.writeEndObject();
         }
+    }
 
-        private BigDecimal localize(BigDecimal number, Currency currency) {
-            return number.setScale(currency.getDefaultFractionDigits(), BigDecimal.ROUND_HALF_UP);
+    static class ItemSerializer extends JsonSerializer<Item> {
+
+        @Override
+        public void serialize(
+                Item item,
+                JsonGenerator jsonGenerator,
+                SerializerProvider provider
+        ) throws IOException {
+            jsonGenerator.writeStartObject();
+            jsonGenerator.writeStringField("id", item.id);
+            jsonGenerator.writeStringField("code", item.code);
+            jsonGenerator.writeNumberField("totalAmount", item.totalAmount);
+            jsonGenerator.writeObjectField("items", item.getAmountGroups());
+            jsonGenerator.writeEndObject();
         }
-
     }
 }
