@@ -25,11 +25,12 @@ public class SpringBootMoneyApplication {
     @RestController
     public class DocumentController {
 
-        // http://localhost:8080/document?currencyCode=CAD
+        // 0 http://localhost:8080/document?currencyCode=JPY
+        // 2 http://localhost:8080/document?currencyCode=CAD
+        // 3 http://localhost:8080/document?currencyCode=LYD
 
         @RequestMapping("/document")
         public Document get(@RequestParam(value = "currencyCode", defaultValue = "USD") String currencyCode) {
-            ThreadLocalStorage.setCurrency(Currency.getInstance(currencyCode));
             return buildDocument(Currency.getInstance(currencyCode));
         }
     }
@@ -38,6 +39,7 @@ public class SpringBootMoneyApplication {
     @AllArgsConstructor
     static class Document {
         private String id;
+        @JsonSerialize(using = DocumentCurrencySerializer.class)
         private Currency currency;
         private List<Item> items;
     }
@@ -47,7 +49,7 @@ public class SpringBootMoneyApplication {
     static class Item {
         private String id;
         private String code;
-        @JsonSerialize(using = BigDecimalSerializer.class)
+        @JsonSerialize(using = MonetaryAmountSerializer.class)
         private BigDecimal totalAmount;
         private List<AmountGroup> amountGroups;
     }
@@ -56,13 +58,26 @@ public class SpringBootMoneyApplication {
     @AllArgsConstructor
     static class AmountGroup {
         private String name;
-        @JsonSerialize(using = BigDecimalSerializer.class)
+        @JsonSerialize(using = MonetaryAmountSerializer.class)
         private BigDecimal netAmount;
-        @JsonSerialize(using = BigDecimalSerializer.class)
+        @JsonSerialize(using = MonetaryAmountSerializer.class)
         private BigDecimal grossAmount;
     }
 
-    static class BigDecimalSerializer extends JsonSerializer<BigDecimal> {
+    static class DocumentCurrencySerializer extends JsonSerializer<Currency> {
+
+        @Override
+        public void serialize(
+                Currency currency,
+                JsonGenerator jsonGenerator,
+                SerializerProvider provider
+        ) throws IOException {
+            ThreadLocalStorage.setCurrency(currency);
+            jsonGenerator.writeObject(currency);
+        }
+    }
+
+    static class MonetaryAmountSerializer extends JsonSerializer<BigDecimal> {
 
         @Override
         public void serialize(
@@ -70,10 +85,10 @@ public class SpringBootMoneyApplication {
                 JsonGenerator jsonGenerator,
                 SerializerProvider provider
         ) throws IOException {
-            jsonGenerator.writeNumber(localize(number, ThreadLocalStorage.getCurrency()));
+            jsonGenerator.writeNumber(localizeMonetaryAmount(number, ThreadLocalStorage.getCurrency()));
         }
 
-        private BigDecimal localize(BigDecimal number, Currency currency) {
+        private BigDecimal localizeMonetaryAmount(BigDecimal number, Currency currency) {
             return number.setScale(currency.getDefaultFractionDigits(), BigDecimal.ROUND_HALF_UP);
         }
     }
